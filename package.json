@@ -1,0 +1,40 @@
+{
+  "name": "ai-agent-nodejs",
+  "version": "1.0.0",
+  "description": "A scalable Node.js AI agent that integrates with OpenAI's ChatGPT API and supports custom tools",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "chat": "node src/index.js chat",
+    "dev": "nodemon src/index.js chat",
+    "test": "jest",
+    "test:auto": "node examples/test-auto-detection.js",
+    "example:basic": "node examples/basic-usage.js",
+    "example:custom": "node examples/custom-tool.js",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "openai",
+    "chatgpt",
+    "tools",
+    "nodejs",
+    "automation"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.6.0",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "eslint": "^8.50.0",
+    "jest": "^29.7.0",
+    "nodemon": "^3.0.1"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
