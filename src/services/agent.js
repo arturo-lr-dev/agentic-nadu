@@ -1,5 +1,6 @@
 const OpenAIService = require('./openai');
 const ToolRegistry = require('../tools/registry');
+const SessionManager = require('./session-manager');
 const { logger } = require('../utils/logger');
 const { config } = require('../config');
 
@@ -7,7 +8,7 @@ class Agent {
   constructor() {
     this.openaiService = new OpenAIService();
     this.toolRegistry = new ToolRegistry();
-    this.conversationHistory = [];
+    this.sessionManager = new SessionManager();
     this.maxIterations = config.agent.maxIterations;
 
     this.initializeTools();
@@ -19,17 +20,24 @@ class Agent {
     this.toolRegistry.loadToolsFromDirectory(toolsDir);
   }
 
-  async processMessage(userMessage, systemPrompt = null) {
+  async processMessage(userMessage, userId = null, systemPrompt = null) {
     try {
+      // Generar o usar userId existente
+      const actualUserId = userId || this.sessionManager.generateUserId();
+
+      // Obtener historial de conversación del usuario
+      const conversationHistory = this.sessionManager.getConversationHistory(actualUserId);
+
       logger.info('Processing user message', {
+        userId: actualUserId,
         messageLength: userMessage.length,
-        historyLength: this.conversationHistory.length
+        historyLength: conversationHistory.length
       });
 
       const messages = this.openaiService.formatMessages(
         userMessage,
         systemPrompt || this.getDefaultSystemPrompt(),
-        this.conversationHistory
+        conversationHistory
       );
 
       const tools = this.openaiService.formatToolsForOpenAI(
@@ -58,16 +66,18 @@ class Agent {
           const toolCallNames = message.tool_calls.map(call => call.function.name);
           toolsUsed.push(...toolCallNames);
 
-          const toolResults = await this.executeToolCalls(message.tool_calls);
+          const toolResults = await this.executeToolCalls(message.tool_calls, actualUserId);
           currentMessages.push(...toolResults);
           continue;
         }
 
-        this.updateConversationHistory(userMessage, message.content);
+        // Actualizar historial de conversación para este usuario
+        this.sessionManager.updateConversationHistory(actualUserId, userMessage, message.content);
 
         return {
           success: true,
           response: message.content,
+          userId: actualUserId,
           iterations: iteration,
           toolsUsed: [...new Set(toolsUsed)], // Remove duplicates
           usage: response.usage,
@@ -81,19 +91,21 @@ class Agent {
         error: 'Maximum iterations reached',
         iterations: iteration,
         toolsUsed: [...new Set(toolsUsed)],
+        userId: actualUserId,
       };
 
     } catch (error) {
-      logger.error('Error processing message', { error: error.message });
+      logger.error('Error processing message', { error: error.message, userId: actualUserId });
       return {
         success: false,
         error: error.message,
         toolsUsed: [],
+        userId: actualUserId,
       };
     }
   }
 
-  async executeToolCalls(toolCalls) {
+  async executeToolCalls(toolCalls, userId) {
     const toolResults = [];
 
     for (const toolCall of toolCalls) {
@@ -101,7 +113,10 @@ class Agent {
         const { name: toolName, arguments: toolArgs } = toolCall.function;
         const parsedArgs = JSON.parse(toolArgs);
 
-        logger.info(`Executing tool: ${toolName}`, { args: parsedArgs });
+        // Inyectar userId en los argumentos de la herramienta
+        parsedArgs.userId = userId;
+
+        logger.info(`Executing tool: ${toolName}`, { args: parsedArgs, userId });
 
         const result = await this.toolRegistry.executeTool(toolName, parsedArgs);
 
@@ -130,17 +145,7 @@ class Agent {
     return toolResults;
   }
 
-  updateConversationHistory(userMessage, assistantResponse) {
-    this.conversationHistory.push(
-      { role: 'user', content: userMessage },
-      { role: 'assistant', content: assistantResponse }
-    );
-
-    const maxHistoryLength = 20;
-    if (this.conversationHistory.length > maxHistoryLength) {
-      this.conversationHistory = this.conversationHistory.slice(-maxHistoryLength);
-    }
-  }
+  // Método eliminado - ahora se maneja en SessionManager
 
   getDefaultSystemPrompt() {
     const tools = this.toolRegistry.getAll();
@@ -176,13 +181,29 @@ Always use the most appropriate tool for the user's request. If multiple tools a
 Respond naturally and conversationally, but always use tools when they can provide better, more accurate, or more current information than your training data.`;
   }
 
-  clearHistory() {
-    this.conversationHistory = [];
-    logger.info('Conversation history cleared');
+  clearHistory(userId) {
+    this.sessionManager.clearHistory(userId);
+    logger.info('Conversation history cleared', { userId });
   }
 
-  getConversationHistory() {
-    return this.conversationHistory;
+  getConversationHistory(userId) {
+    return this.sessionManager.getConversationHistory(userId);
+  }
+
+  createUserSession(userId = null) {
+    return this.sessionManager.createSession(userId);
+  }
+
+  deleteUserSession(userId) {
+    return this.sessionManager.deleteSession(userId);
+  }
+
+  getActiveSessions() {
+    return this.sessionManager.getActiveSessions();
+  }
+
+  getAllSessions() {
+    return this.sessionManager.getAllSessions();
   }
 
   registerTool(tool) {

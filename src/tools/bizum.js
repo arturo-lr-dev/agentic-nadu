@@ -30,33 +30,48 @@ class BizumTool extends BaseTool {
             description: 'Acción a realizar: send, request, history',
             enum: ['send', 'request', 'history'],
             default: 'send'
+          },
+          userId: {
+            type: 'string',
+            description: 'ID del usuario que realiza la operación (opcional, se detecta automáticamente)',
+            default: 'default'
           }
         },
         required: ['amount', 'recipient']
       }
     );
 
-    this.transactionFile = path.join(__dirname, '../../data/bizum_transactions.json');
+    this.dataDir = path.join(__dirname, '../../data/users');
     this.ensureDataDirectory();
   }
 
   ensureDataDirectory() {
-    const dataDir = path.dirname(this.transactionFile);
-    if (!fs.existsSync(dataDir)) {
-      fs.mkdirSync(dataDir, { recursive: true });
+    if (!fs.existsSync(this.dataDir)) {
+      fs.mkdirSync(this.dataDir, { recursive: true });
     }
+  }
 
-    if (!fs.existsSync(this.transactionFile)) {
-      fs.writeFileSync(this.transactionFile, JSON.stringify([], null, 2));
+  getUserTransactionFile(userId) {
+    return path.join(this.dataDir, `${userId}_bizum.json`);
+  }
+
+  ensureUserFile(userId) {
+    const userFile = this.getUserTransactionFile(userId);
+    if (!fs.existsSync(userFile)) {
+      fs.writeFileSync(userFile, JSON.stringify([], null, 2));
     }
   }
 
   async execute(args) {
-    const { amount, recipient, concept = 'Bizum', action = 'send' } = args;
+    const { amount, recipient, concept = 'Bizum', action = 'send', userId = 'default' } = args;
 
     try {
+      // Generar userId único si no se proporciona
+      const actualUserId = userId === 'default' ? this.generateUserId() : userId;
+      this.ensureUserFile(actualUserId);
+
       if (action === 'history') {
-        return this.getTransactionHistory();
+        return this.getTransactionHistory(actualUserId);
       }
 
       // Validaciones
@@ -71,6 +86,7 @@ class BizumTool extends BaseTool {
       // Simular proceso de envío
       const transaction = {
         id: this.generateTransactionId(),
+        userId: actualUserId,
         type: action,
         amount: parseFloat(amount.toFixed(2)),
         recipient: recipient.trim(),
@@ -82,7 +98,7 @@ class BizumTool extends BaseTool {
       };
 
       // Guardar transacción
-      this.saveTransaction(transaction);
+      this.saveTransaction(transaction, actualUserId);
 
       // Simular tiempo de procesamiento
       await new Promise(resolve => setTimeout(resolve, 1500));
@@ -94,6 +110,7 @@ class BizumTool extends BaseTool {
         success: true,
         transaction: {
           id: transaction.id,
+          userId: actualUserId,
           amount: `${transaction.amount}€`,
           recipient: transaction.recipient,
           concept: transaction.concept,
@@ -102,7 +119,8 @@ class BizumTool extends BaseTool {
         },
         message: `✅ Bizum ${actionText} correctamente`,
         details: `Has ${actionText} ${transaction.amount}€ ${preposition} ${transaction.recipient}`,
-        reference: `Referencia: ${transaction.id}`
+        reference: `Referencia: ${transaction.id}`,
+        userInfo: `Usuario: ${actualUserId}`
       };
 
     } catch (error) {
@@ -160,39 +178,49 @@ class BizumTool extends BaseTool {
     return `BZ${timestamp.slice(-8)}${random}`;
   }
 
-  saveTransaction(transaction) {
+  generateUserId() {
+    const timestamp = Date.now().toString();
+    const random = Math.random().toString(36).substring(2, 6);
+    return `user_${timestamp.slice(-6)}_${random}`;
+  }
+
+  saveTransaction(transaction, userId) {
     try {
+      const userFile = this.getUserTransactionFile(userId);
       let transactions = [];
 
-      if (fs.existsSync(this.transactionFile)) {
-        const data = fs.readFileSync(this.transactionFile, 'utf8');
+      if (fs.existsSync(userFile)) {
+        const data = fs.readFileSync(userFile, 'utf8');
         transactions = JSON.parse(data);
       }
 
       transactions.push(transaction);
 
-      // Mantener solo las últimas 50 transacciones
-      if (transactions.length > 50) {
-        transactions = transactions.slice(-50);
+      // Mantener solo las últimas 100 transacciones por usuario
+      if (transactions.length > 100) {
+        transactions = transactions.slice(-100);
       }
 
-      fs.writeFileSync(this.transactionFile, JSON.stringify(transactions, null, 2));
+      fs.writeFileSync(userFile, JSON.stringify(transactions, null, 2));
     } catch (error) {
       console.error('Error saving transaction:', error);
     }
   }
 
-  getTransactionHistory() {
+  getTransactionHistory(userId) {
     try {
-      if (!fs.existsSync(this.transactionFile)) {
+      const userFile = this.getUserTransactionFile(userId);
+
+      if (!fs.existsSync(userFile)) {
         return {
           success: true,
-          message: 'No hay transacciones registradas',
-          transactions: []
+          message: 'No hay transacciones registradas para este usuario',
+          transactions: [],
+          userId: userId
         };
       }
 
-      const data = fs.readFileSync(this.transactionFile, 'utf8');
+      const data = fs.readFileSync(userFile, 'utf8');
       const transactions = JSON.parse(data);
 
       // Ordenar por fecha más reciente
@@ -213,13 +241,55 @@ class BizumTool extends BaseTool {
       return {
         success: true,
         message: `Últimas ${sortedTransactions.length} transacciones Bizum`,
-        transactions: sortedTransactions
+        transactions: sortedTransactions,
+        userId: userId,
+        totalTransactions: transactions.length
       };
 
     } catch (error) {
       return {
         success: false,
         error: `Error al obtener el historial: ${error.message}`
+      };
+    }
+  }
+
+  // Método para obtener estadísticas de todos los usuarios (admin)
+  getAllUsersStats() {
+    try {
+      const users = [];
+      const files = fs.readdirSync(this.dataDir);
+
+      for (const file of files) {
+        if (file.endsWith('_bizum.json')) {
+          const userId = file.replace('_bizum.json', '');
+          const userFile = path.join(this.dataDir, file);
+          const data = fs.readFileSync(userFile, 'utf8');
+          const transactions = JSON.parse(data);
+
+          const totalAmount = transactions.reduce((sum, t) => sum + t.amount, 0);
+          const totalTransactions = transactions.length;
+
+          users.push({
+            userId,
+            totalTransactions,
+            totalAmount: `${totalAmount.toFixed(2)}€`,
+            lastTransaction: transactions.length > 0 ?
+              transactions[transactions.length - 1].date : 'Nunca'
+          });
+        }
+      }
+
+      return {
+        success: true,
+        message: `Estadísticas de ${users.length} usuarios`,
+        users: users
+      };
+
+    } catch (error) {
+      return {
+        success: false,
+        error: `Error al obtener estadísticas: ${error.message}`
       };
     }
   }

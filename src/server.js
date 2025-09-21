@@ -41,7 +41,7 @@ class APIServer {
 
     this.app.post('/api/chat', async (req, res) => {
       try {
-        const { message, systemPrompt } = req.body;
+        const { message, userId, systemPrompt } = req.body;
 
         if (!message || typeof message !== 'string') {
           return res.status(400).json({
@@ -57,7 +57,8 @@ class APIServer {
           });
         }
 
-        const result = await this.aiAgent.processMessage(message.trim(), systemPrompt);
+        // Usar userId del body o generar uno nuevo
+        const result = await this.aiAgent.processMessage(message.trim(), userId, systemPrompt);
 
         res.json(result);
 
@@ -96,6 +97,8 @@ class APIServer {
 
     this.app.post('/api/clear-history', (req, res) => {
       try {
+        const { userId } = req.body;
+
         if (!this.aiAgent) {
           return res.status(503).json({
             success: false,
@@ -103,10 +106,18 @@ class APIServer {
           });
         }
 
-        this.aiAgent.getAgent().clearHistory();
+        if (!userId) {
+          return res.status(400).json({
+            success: false,
+            error: 'userId is required'
+          });
+        }
+
+        this.aiAgent.getAgent().clearHistory(userId);
         res.json({
           success: true,
-          message: 'Conversation history cleared'
+          message: 'Conversation history cleared',
+          userId: userId
         });
 
       } catch (error) {
@@ -118,7 +129,70 @@ class APIServer {
       }
     });
 
-    this.app.get('/api/history', (req, res) => {
+    this.app.get('/api/history/:userId?', (req, res) => {
+      try {
+        const { userId } = req.params;
+
+        if (!this.aiAgent) {
+          return res.status(503).json({
+            success: false,
+            error: 'AI Agent is not initialized'
+          });
+        }
+
+        if (!userId) {
+          return res.status(400).json({
+            success: false,
+            error: 'userId is required'
+          });
+        }
+
+        const history = this.aiAgent.getAgent().getConversationHistory(userId);
+        res.json({
+          success: true,
+          history: history,
+          userId: userId
+        });
+
+      } catch (error) {
+        logger.error('API history error', { error: error.message });
+        res.status(500).json({
+          success: false,
+          error: 'Internal server error'
+        });
+      }
+    });
+
+    // Endpoint para crear nueva sesión
+    this.app.post('/api/session', (req, res) => {
+      try {
+        const { userId } = req.body;
+
+        if (!this.aiAgent) {
+          return res.status(503).json({
+            success: false,
+            error: 'AI Agent is not initialized'
+          });
+        }
+
+        const newUserId = this.aiAgent.getAgent().createUserSession(userId);
+        res.json({
+          success: true,
+          userId: newUserId,
+          message: 'Session created successfully'
+        });
+
+      } catch (error) {
+        logger.error('API create session error', { error: error.message });
+        res.status(500).json({
+          success: false,
+          error: 'Internal server error'
+        });
+      }
+    });
+
+    // Endpoint para obtener sesiones activas
+    this.app.get('/api/sessions', (req, res) => {
       try {
         if (!this.aiAgent) {
           return res.status(503).json({
@@ -127,14 +201,57 @@ class APIServer {
           });
         }
 
-        const history = this.aiAgent.getAgent().getConversationHistory();
+        const activeSessions = this.aiAgent.getAgent().getActiveSessions();
         res.json({
           success: true,
-          history: history
+          sessions: activeSessions
         });
 
       } catch (error) {
-        logger.error('API history error', { error: error.message });
+        logger.error('API sessions error', { error: error.message });
+        res.status(500).json({
+          success: false,
+          error: 'Internal server error'
+        });
+      }
+    });
+
+    // Endpoint para eliminar sesión
+    this.app.delete('/api/session/:userId', (req, res) => {
+      try {
+        const { userId } = req.params;
+
+        if (!this.aiAgent) {
+          return res.status(503).json({
+            success: false,
+            error: 'AI Agent is not initialized'
+          });
+        }
+
+        if (!userId) {
+          return res.status(400).json({
+            success: false,
+            error: 'userId is required'
+          });
+        }
+
+        const deleted = this.aiAgent.getAgent().deleteUserSession(userId);
+
+        if (deleted) {
+          res.json({
+            success: true,
+            message: 'Session deleted successfully',
+            userId: userId
+          });
+        } else {
+          res.status(404).json({
+            success: false,
+            error: 'Session not found'
+          });
+        }
+
+      } catch (error) {
+        logger.error('API delete session error', { error: error.message });
         res.status(500).json({
           success: false,
           error: 'Internal server error'

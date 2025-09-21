@@ -26,15 +26,15 @@ class AIAgentApp {
     }
   }
 
-  async processMessage(message, systemPrompt = null) {
+  async processMessage(message, userId = null, systemPrompt = null) {
     if (!this.agent) {
       throw new Error('Agent not initialized. Call initialize() first.');
     }
 
-    return await this.agent.processMessage(message, systemPrompt);
+    return await this.agent.processMessage(message, userId, systemPrompt);
   }
 
-  async chat() {
+  async chat(userId = null) {
     const readline = require('readline');
 
     const rl = readline.createInterface({
@@ -42,7 +42,17 @@ class AIAgentApp {
       output: process.stdout,
     });
 
-    console.log(`\n🤖 ${config.agent.name} is ready! Type 'exit' to quit.\n`);
+    // Crear o usar sesión existente
+    const sessionUserId = userId || this.agent.createUserSession();
+
+    console.log(`\n🤖 ${config.agent.name} is ready! Type 'exit' to quit.`);
+    console.log(`👤 Session ID: ${sessionUserId}\n`);
+    console.log(`Available commands:`);
+    console.log(`  - 'exit': Quit chat`);
+    console.log(`  - 'clear': Clear conversation history`);
+    console.log(`  - 'tools': Show available tools`);
+    console.log(`  - 'sessions': Show active sessions`);
+    console.log(`  - 'switch [userId]': Switch to different user session\n`);
 
     const askQuestion = () => {
       rl.question('You: ', async (input) => {
@@ -53,7 +63,7 @@ class AIAgentApp {
         }
 
         if (input.toLowerCase() === 'clear') {
-          this.agent.clearHistory();
+          this.agent.clearHistory(sessionUserId);
           console.log('\n🧹 Conversation history cleared.\n');
           askQuestion();
           return;
@@ -70,6 +80,30 @@ class AIAgentApp {
           return;
         }
 
+        if (input.toLowerCase() === 'sessions') {
+          const sessions = this.agent.getActiveSessions();
+          console.log('\n👥 Active sessions:');
+          sessions.forEach(session => {
+            const marker = session.userId === sessionUserId ? ' (current)' : '';
+            console.log(`  - ${session.userId}: ${session.messageCount} messages${marker}`);
+          });
+          console.log('');
+          askQuestion();
+          return;
+        }
+
+        if (input.toLowerCase().startsWith('switch ')) {
+          const newUserId = input.substring(7).trim();
+          if (newUserId) {
+            sessionUserId = newUserId;
+            console.log(`\n🔄 Switched to session: ${sessionUserId}\n`);
+          } else {
+            console.log('\n❌ Please provide a user ID: switch [userId]\n');
+          }
+          askQuestion();
+          return;
+        }
+
         if (input.trim() === '') {
           askQuestion();
           return;
@@ -78,7 +112,7 @@ class AIAgentApp {
         try {
           console.log('\n🤔 Thinking...\n');
 
-          const result = await this.processMessage(input);
+          const result = await this.processMessage(input, sessionUserId);
 
           if (result.success) {
             console.log(`🤖 ${config.agent.name}: ${result.response}\n`);

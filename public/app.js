@@ -5,9 +5,11 @@ class ChatApp {
         this.agentName = 'Santander';
         this.isRecording = false;
         this.recognition = null;
+        this.userId = null;
 
         this.initializeElements();
         this.bindEvents();
+        this.initializeSession();
         this.loadAgentInfo();
         this.autoResizeTextarea();
         this.checkMicrophonePermission();
@@ -81,7 +83,7 @@ class ChatApp {
 
             if (data.agent && data.agent.name) {
                 this.agentName = data.agent.name;
-                this.agentNameElement.textContent = this.agentName;
+                this.updateHeaderTitle();
             }
 
             this.updateStatus('Conectado', 'connected');
@@ -89,6 +91,15 @@ class ChatApp {
             console.error('Error loading agent info:', error);
             this.updateStatus('Desconectado', 'disconnected');
         }
+    }
+
+    updateHeaderTitle() {
+        let title = this.agentName || 'Santander Assistant';
+        if (this.userId) {
+            const shortId = this.userId.substring(0, 8) + '...';
+            title += ` (${shortId})`;
+        }
+        this.agentNameElement.textContent = title;
     }
 
     updateStatus(text, status) {
@@ -114,12 +125,22 @@ class ChatApp {
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ message }),
+                body: JSON.stringify({
+                    message,
+                    userId: this.userId
+                }),
             });
 
             const data = await response.json();
 
             if (data.success) {
+                // Actualizar userId si es nuevo
+                if (data.userId && !this.userId) {
+                    this.userId = data.userId;
+                    this.saveUserSession();
+                    this.updateHeaderTitle();
+                }
+
                 this.addMessage(data.response, 'assistant', {
                     iterations: data.iterations,
                     toolsUsed: data.toolsUsed,
@@ -212,9 +233,18 @@ class ChatApp {
             return;
         }
 
+        if (!this.userId) {
+            this.showError('No hay sesión activa para limpiar');
+            return;
+        }
+
         try {
             const response = await fetch(`${this.baseURL}/clear-history`, {
                 method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ userId: this.userId }),
             });
 
             const data = await response.json();
@@ -500,6 +530,61 @@ class ChatApp {
                 setTimeout(() => this.hideTranscriptionStatus(), 2000);
             }
         }, 3000);
+    }
+
+    async initializeSession() {
+        // Intentar recuperar sesión existente del localStorage
+        const savedUserId = localStorage.getItem('santander_userId');
+
+        if (savedUserId) {
+            console.log('Found saved session:', savedUserId);
+            this.userId = savedUserId;
+            this.updateHeaderTitle();
+            await this.loadSessionHistory();
+        } else {
+            console.log('No saved session, will create new on first message');
+        }
+    }
+
+    async loadSessionHistory() {
+        if (!this.userId) return;
+
+        try {
+            const response = await fetch(`${this.baseURL}/history/${this.userId}`);
+            const data = await response.json();
+
+            if (data.success && data.history && data.history.length > 0) {
+                console.log('Loading session history:', data.history.length, 'messages');
+
+                // Limpiar mensajes existentes excepto el mensaje de bienvenida
+                const messages = this.chatMessages.querySelectorAll('.message');
+                messages.forEach((message, index) => {
+                    if (index > 0) { // Mantener solo el primer mensaje de bienvenida
+                        message.remove();
+                    }
+                });
+
+                // Cargar historial
+                data.history.forEach(msg => {
+                    this.addMessage(msg.content, msg.role);
+                });
+            }
+        } catch (error) {
+            console.error('Error loading session history:', error);
+        }
+    }
+
+    saveUserSession() {
+        if (this.userId) {
+            localStorage.setItem('santander_userId', this.userId);
+            console.log('Session saved:', this.userId);
+        }
+    }
+
+    clearUserSession() {
+        this.userId = null;
+        localStorage.removeItem('santander_userId');
+        console.log('Session cleared from localStorage');
     }
 }
 
