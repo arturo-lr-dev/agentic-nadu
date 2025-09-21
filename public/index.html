@@ -335,6 +335,191 @@
             font-style: italic;
         }
 
+        /* Bizum Inline Confirmation Component */
+        .bizum-confirmation-component {
+            background: linear-gradient(135deg, #FFF8F8, #FFFFFF);
+            border: 2px solid #EC0000;
+            border-radius: 16px;
+            margin: 16px 0;
+            padding: 20px;
+            animation: slideInUp 0.3s ease-out;
+            box-shadow: 0 4px 16px rgba(236, 0, 0, 0.1);
+        }
+
+        @keyframes slideInUp {
+            from {
+                transform: translateY(20px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        .bizum-confirmation-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 16px;
+            gap: 10px;
+        }
+
+        .bizum-confirmation-icon {
+            font-size: 24px;
+        }
+
+        .bizum-confirmation-title {
+            color: #EC0000;
+            font-size: 18px;
+            font-weight: 600;
+            margin: 0;
+        }
+
+        .bizum-transaction-summary {
+            background: #F8F9FA;
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 16px;
+            border-left: 4px solid #EC0000;
+        }
+
+        .bizum-summary-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            font-size: 15px;
+        }
+
+        .bizum-summary-row:last-child {
+            margin-bottom: 0;
+        }
+
+        .bizum-summary-label {
+            color: #666;
+            font-weight: 500;
+        }
+
+        .bizum-summary-value {
+            color: #333;
+            font-weight: 600;
+        }
+
+        .bizum-amount-value {
+            color: #EC0000;
+            font-size: 18px;
+            font-weight: 700;
+        }
+
+        .bizum-confirmation-warning {
+            background: #FFF3CD;
+            border: 1px solid #FFE69C;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 16px;
+            font-size: 13px;
+            color: #856404;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .bizum-actions {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .bizum-signature-btn {
+            background: linear-gradient(135deg, #EC0000, #C62828);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            padding: 12px 24px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+            min-width: 160px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .bizum-signature-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(236, 0, 0, 0.3);
+        }
+
+        .bizum-signature-btn:active {
+            transform: translateY(0);
+        }
+
+        .bizum-signature-btn.signing {
+            background: #4CAF50;
+            pointer-events: none;
+        }
+
+        .bizum-signature-btn .btn-text {
+            transition: opacity 0.3s;
+        }
+
+        .bizum-signature-btn.signing .btn-text {
+            opacity: 0;
+        }
+
+        .bizum-signature-btn .signing-spinner {
+            position: absolute;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        .bizum-signature-btn.signing .signing-spinner {
+            opacity: 1;
+        }
+
+        .spinner {
+            width: 20px;
+            height: 20px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-top: 2px solid white;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .bizum-cancel-btn {
+            background: #F5F5F5;
+            color: #666;
+            border: 1px solid #E0E0E0;
+            border-radius: 12px;
+            padding: 12px 20px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .bizum-cancel-btn:hover {
+            background: #E0E0E0;
+            color: #333;
+        }
+
+        .bizum-help-text {
+            color: #666;
+            font-size: 13px;
+            margin-top: 12px;
+            text-align: center;
+            font-style: italic;
+        }
+
         @media (max-width: 768px) {
             .chat-header {
                 padding: 12px 16px;
@@ -384,6 +569,26 @@
 
             .message-content {
                 font-size: 14px;
+            }
+
+            .bizum-confirmation-component {
+                padding: 16px;
+                margin: 12px 0;
+            }
+
+            .bizum-confirmation-title {
+                font-size: 16px;
+            }
+
+            .bizum-actions {
+                flex-direction: column;
+                gap: 8px;
+            }
+
+            .bizum-signature-btn,
+            .bizum-cancel-btn {
+                width: 100%;
+                justify-content: center;
             }
         }
 
@@ -466,6 +671,7 @@
             <div class="transcription-status" id="transcription-status"></div>
         </div>
     </div>
+
 
     <script src="app.js"></script>
 </body>

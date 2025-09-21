@@ -6,6 +6,7 @@ class ChatApp {
         this.isRecording = false;
         this.recognition = null;
         this.userId = null;
+        this.pendingBizumConfirmation = null;
 
         this.initializeElements();
         this.bindEvents();
@@ -14,6 +15,7 @@ class ChatApp {
         this.autoResizeTextarea();
         this.checkMicrophonePermission();
         this.initializeSpeechRecognition();
+        this.initializeBizumModal();
     }
 
     initializeElements() {
@@ -27,6 +29,9 @@ class ChatApp {
         this.showToolsButton = document.getElementById('show-tools');
         this.audioButton = document.getElementById('audio-button');
         this.transcriptionStatus = document.getElementById('transcription-status');
+
+        // Bizum confirmation component (created dynamically)
+        this.activeBizumConfirmation = null;
     }
 
     bindEvents() {
@@ -190,6 +195,9 @@ class ChatApp {
                             } else if (parsed.type === 'tool_execution') {
                                 console.log('🔧 Tool execution:', parsed.tools);
                                 this.showToolExecution(parsed.tools);
+                            } else if (parsed.type === 'bizum_confirmation') {
+                                console.log('💳 Bizum confirmation request:', parsed);
+                                this.handleBizumConfirmationRequest(parsed);
                             } else if (parsed.type === 'response_start') {
                                 console.log('🚀 Starting response streaming...');
                             } else if (parsed.type === 'complete') {
@@ -741,6 +749,221 @@ class ChatApp {
         this.userId = null;
         localStorage.removeItem('santander_userId');
         console.log('Session cleared from localStorage');
+    }
+
+    initializeBizumModal() {
+        // No initialization needed for inline component
+        // Event handlers are bound when component is created
+    }
+
+    showBizumConfirmation(transactionData) {
+        console.log('Showing Bizum confirmation component:', transactionData);
+
+        // Remove any existing confirmation component
+        this.removeBizumConfirmation();
+
+        // Store pending transaction
+        this.pendingBizumConfirmation = transactionData;
+
+        // Create confirmation component
+        const confirmationComponent = this.createBizumConfirmationComponent(transactionData);
+
+        // Add to chat messages
+        this.chatMessages.appendChild(confirmationComponent);
+        this.activeBizumConfirmation = confirmationComponent;
+
+        // Scroll to show the confirmation
+        this.scrollToBottom();
+    }
+
+    createBizumConfirmationComponent(transactionData) {
+        const component = document.createElement('div');
+        component.className = 'bizum-confirmation-component';
+
+        component.innerHTML = `
+            <div class="bizum-confirmation-header">
+                <span class="bizum-confirmation-icon">💳</span>
+                <h3 class="bizum-confirmation-title">Confirmar Bizum</h3>
+            </div>
+
+            <div class="bizum-transaction-summary">
+                <div class="bizum-summary-row">
+                    <span class="bizum-summary-label">Destinatario:</span>
+                    <span class="bizum-summary-value">${transactionData.recipient || 'No especificado'}</span>
+                </div>
+                <div class="bizum-summary-row">
+                    <span class="bizum-summary-label">Importe:</span>
+                    <span class="bizum-summary-value bizum-amount-value">${transactionData.amount}€</span>
+                </div>
+                <div class="bizum-summary-row">
+                    <span class="bizum-summary-label">Concepto:</span>
+                    <span class="bizum-summary-value">${transactionData.concept || 'Bizum'}</span>
+                </div>
+            </div>
+
+            <div class="bizum-confirmation-warning">
+                <span>⚠️</span>
+                <span>Esta operación no se puede deshacer. Verifica que los datos sean correctos antes de firmar.</span>
+            </div>
+
+            <div class="bizum-actions">
+                <button class="bizum-signature-btn" data-confirmation-id="${transactionData.confirmationId}">
+                    <span class="btn-text">🖊️ Firmar Transacción</span>
+                    <div class="signing-spinner">
+                        <div class="spinner"></div>
+                    </div>
+                </button>
+                <button class="bizum-cancel-btn" data-confirmation-id="${transactionData.confirmationId}">
+                    Cancelar
+                </button>
+            </div>
+
+            <div class="bizum-help-text">
+                Para completar la transacción, confirma con tu firma digital
+            </div>
+        `;
+
+        // Bind event handlers
+        const signatureBtn = component.querySelector('.bizum-signature-btn');
+        const cancelBtn = component.querySelector('.bizum-cancel-btn');
+
+        signatureBtn.addEventListener('click', () => this.handleBizumSignature());
+        cancelBtn.addEventListener('click', () => this.cancelBizumTransaction());
+
+        return component;
+    }
+
+    async handleBizumSignature() {
+        if (!this.pendingBizumConfirmation || !this.activeBizumConfirmation) {
+            console.error('No pending Bizum confirmation');
+            return;
+        }
+
+        console.log('Processing Bizum signature...');
+
+        const signatureBtn = this.activeBizumConfirmation.querySelector('.bizum-signature-btn');
+        const cancelBtn = this.activeBizumConfirmation.querySelector('.bizum-cancel-btn');
+
+        // Start signing animation
+        signatureBtn.classList.add('signing');
+        signatureBtn.disabled = true;
+        cancelBtn.disabled = true;
+
+        try {
+            // Simulate signature process (2 seconds)
+            await new Promise(resolve => setTimeout(resolve, 2000));
+
+            // Send confirmation to backend
+            const response = await fetch(`${this.baseURL}/bizum/confirm`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    userId: this.userId,
+                    confirmationId: this.pendingBizumConfirmation.confirmationId,
+                    confirmed: true,
+                    signature: this.generateSignature()
+                }),
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                console.log('Bizum transaction confirmed successfully');
+
+                // Remove confirmation component
+                this.removeBizumConfirmation();
+
+                // Show success message in chat based on backend response
+                const successMessage = result.message || `✅ Bizum confirmado y enviado: ${this.pendingBizumConfirmation.amount}€ a ${this.pendingBizumConfirmation.recipient}`;
+                this.addMessage(successMessage, 'assistant');
+
+                // Add transaction details if available
+                if (result.details) {
+                    this.addMessage(result.details, 'assistant');
+                }
+            } else {
+                throw new Error(result.error || 'Error al confirmar la transacción');
+            }
+
+        } catch (error) {
+            console.error('Error confirming Bizum:', error);
+            this.showError('Error al confirmar la transacción Bizum');
+
+            // Reset button state
+            signatureBtn.classList.remove('signing');
+            signatureBtn.disabled = false;
+            cancelBtn.disabled = false;
+        }
+
+        this.pendingBizumConfirmation = null;
+    }
+
+    async cancelBizumTransaction() {
+        console.log('Cancelling Bizum transaction');
+
+        if (this.pendingBizumConfirmation) {
+            try {
+                // Send cancellation to backend
+                const response = await fetch(`${this.baseURL}/bizum/confirm`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        userId: this.userId,
+                        confirmationId: this.pendingBizumConfirmation.confirmationId,
+                        confirmed: false
+                    }),
+                });
+
+                const result = await response.json();
+
+                // Remove confirmation component
+                this.removeBizumConfirmation();
+
+                if (result.success) {
+                    // Show backend response message
+                    const cancelMessage = result.message || '❌ Transacción Bizum cancelada';
+                    this.addMessage(cancelMessage, 'assistant');
+                } else {
+                    this.addMessage('❌ Transacción Bizum cancelada', 'assistant');
+                }
+            } catch (error) {
+                console.error('Error sending cancellation:', error);
+                this.removeBizumConfirmation();
+                this.addMessage('❌ Transacción Bizum cancelada', 'assistant');
+            }
+        }
+
+        this.pendingBizumConfirmation = null;
+    }
+
+    removeBizumConfirmation() {
+        if (this.activeBizumConfirmation && this.activeBizumConfirmation.parentNode) {
+            this.activeBizumConfirmation.remove();
+            this.activeBizumConfirmation = null;
+        }
+    }
+
+    generateSignature() {
+        // Generate a mock digital signature
+        const timestamp = Date.now();
+        const random = Math.random().toString(36).substring(2, 15);
+        return `SIG${timestamp}${random}`.toUpperCase();
+    }
+
+    handleBizumConfirmationRequest(data) {
+        console.log('Received Bizum confirmation request:', data);
+
+        // Show confirmation modal
+        this.showBizumConfirmation({
+            confirmationId: data.confirmationId,
+            recipient: data.recipient,
+            amount: data.amount,
+            concept: data.concept || 'Bizum'
+        });
     }
 }
 

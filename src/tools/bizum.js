@@ -1,6 +1,7 @@
 const BaseTool = require('./base');
 const fs = require('fs');
 const path = require('path');
+const EventEmitter = require('events');
 
 class BizumTool extends BaseTool {
   constructor() {
@@ -42,6 +43,7 @@ class BizumTool extends BaseTool {
     );
 
     this.dataDir = path.join(__dirname, '../../data/users');
+    this.pendingConfirmations = new Map();
     this.ensureDataDirectory();
   }
 
@@ -114,8 +116,9 @@ class BizumTool extends BaseTool {
         };
       }
 
-      // Simular proceso de envío
-      const transaction = {
+      // Generate confirmation ID and prepare transaction data
+      const confirmationId = this.generateConfirmationId();
+      const transactionData = {
         id: this.generateTransactionId(),
         userId: actualUserId,
         type: action,
@@ -125,36 +128,31 @@ class BizumTool extends BaseTool {
         fromContact: resolvedRecipient.fromContact,
         concept: concept.trim(),
         timestamp: new Date().toISOString(),
-        status: 'completed',
+        status: 'pending_confirmation',
         date: new Date().toLocaleDateString('es-ES'),
         time: new Date().toLocaleTimeString('es-ES')
       };
 
-      // Guardar transacción
-      this.saveTransaction(transaction, actualUserId);
+      // Store pending confirmation
+      this.pendingConfirmations.set(confirmationId, {
+        transactionData,
+        expiresAt: Date.now() + (5 * 60 * 1000) // 5 minutes
+      });
 
-      // Simular tiempo de procesamiento
-      await new Promise(resolve => setTimeout(resolve, 1500));
-
-      const actionText = action === 'send' ? 'enviado' : 'solicitado';
-      const preposition = action === 'send' ? 'a' : 'de';
-
+      // Return confirmation request instead of completed transaction
       return {
         success: true,
-        transaction: {
-          id: transaction.id,
-          userId: actualUserId,
-          amount: `${transaction.amount}€`,
-          recipient: transaction.recipient,
-          concept: transaction.concept,
-          status: transaction.status,
-          timestamp: `${transaction.date} ${transaction.time}`
+        requiresConfirmation: true,
+        confirmationId: confirmationId,
+        confirmationType: 'bizum_confirmation',
+        transactionData: {
+          amount: transactionData.amount,
+          recipient: transactionData.recipient,
+          concept: transactionData.concept,
+          action: action
         },
-        message: `✅ Bizum ${actionText} correctamente`,
-        details: `Has ${actionText} ${transaction.amount}€ ${preposition} ${transaction.recipient}${transaction.fromContact ? ' (desde contactos)' : ''}`,
-        reference: `Referencia: ${transaction.id}`,
-        userInfo: `Usuario: ${actualUserId}`,
-        contactUsed: transaction.fromContact
+        message: `💳 Confirmación requerida para Bizum de ${transactionData.amount}€ a ${transactionData.recipient}`,
+        details: 'Para completar la transacción, confirma con tu firma digital en el navegador.'
       };
 
     } catch (error) {
@@ -317,6 +315,85 @@ class BizumTool extends BaseTool {
     const timestamp = Date.now().toString();
     const random = Math.random().toString(36).substring(2, 6);
     return `user_${timestamp.slice(-6)}_${random}`;
+  }
+
+  generateConfirmationId() {
+    const timestamp = Date.now().toString();
+    const random = Math.random().toString(36).substring(2, 8).toUpperCase();
+    return `CONF${timestamp.slice(-8)}${random}`;
+  }
+
+  async confirmTransaction(confirmationId, confirmed, signature = null) {
+    const pending = this.pendingConfirmations.get(confirmationId);
+
+    if (!pending) {
+      return {
+        success: false,
+        error: 'Confirmación no encontrada o expirada'
+      };
+    }
+
+    // Check if confirmation has expired
+    if (Date.now() > pending.expiresAt) {
+      this.pendingConfirmations.delete(confirmationId);
+      return {
+        success: false,
+        error: 'La confirmación ha expirado'
+      };
+    }
+
+    const { transactionData } = pending;
+
+    if (!confirmed) {
+      // Transaction cancelled
+      this.pendingConfirmations.delete(confirmationId);
+      return {
+        success: true,
+        cancelled: true,
+        message: 'Transacción Bizum cancelada por el usuario'
+      };
+    }
+
+    // Process confirmed transaction
+    transactionData.status = 'completed';
+    transactionData.signature = signature;
+    transactionData.confirmedAt = new Date().toISOString();
+
+    // Save transaction
+    this.saveTransaction(transactionData, transactionData.userId);
+
+    // Remove from pending confirmations
+    this.pendingConfirmations.delete(confirmationId);
+
+    const actionText = transactionData.type === 'send' ? 'enviado' : 'solicitado';
+    const preposition = transactionData.type === 'send' ? 'a' : 'de';
+
+    return {
+      success: true,
+      transaction: {
+        id: transactionData.id,
+        userId: transactionData.userId,
+        amount: `${transactionData.amount}€`,
+        recipient: transactionData.recipient,
+        concept: transactionData.concept,
+        status: transactionData.status,
+        timestamp: `${transactionData.date} ${transactionData.time}`,
+        signature: signature
+      },
+      message: `✅ Bizum ${actionText} correctamente`,
+      details: `Has ${actionText} ${transactionData.amount}€ ${preposition} ${transactionData.recipient}${transactionData.fromContact ? ' (desde contactos)' : ''}`,
+      reference: `Referencia: ${transactionData.id}`,
+      contactUsed: transactionData.fromContact
+    };
+  }
+
+  cleanExpiredConfirmations() {
+    const now = Date.now();
+    for (const [confirmationId, pending] of this.pendingConfirmations.entries()) {
+      if (now > pending.expiresAt) {
+        this.pendingConfirmations.delete(confirmationId);
+      }
+    }
   }
 
   saveTransaction(transaction, userId) {

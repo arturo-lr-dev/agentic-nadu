@@ -83,6 +83,31 @@ class SessionManager {
     });
   }
 
+  addMessageToHistory(userId, role, content) {
+    const session = this.getSession(userId);
+
+    session.conversationHistory.push({
+      role: role,
+      content: content,
+      timestamp: new Date().toISOString()
+    });
+
+    // Mantener máximo 20 mensajes
+    const maxHistoryLength = 20;
+    if (session.conversationHistory.length > maxHistoryLength) {
+      session.conversationHistory = session.conversationHistory.slice(-maxHistoryLength);
+    }
+
+    session.lastActivity = new Date().toISOString();
+    this.saveSession(userId, session);
+
+    logger.debug('Message added to conversation history', {
+      userId,
+      role,
+      historyLength: session.conversationHistory.length
+    });
+  }
+
   clearHistory(userId) {
     const session = this.getSession(userId);
     session.conversationHistory = [];

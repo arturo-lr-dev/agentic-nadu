@@ -340,6 +340,62 @@ class APIServer {
       }
     });
 
+    // Bizum confirmation endpoint
+    this.app.post('/api/bizum/confirm', async (req, res) => {
+      try {
+        const { userId, confirmationId, confirmed, signature } = req.body;
+
+        if (!this.aiAgent) {
+          return res.status(503).json({
+            success: false,
+            error: 'AI Agent is not initialized'
+          });
+        }
+
+        if (!userId || !confirmationId || typeof confirmed !== 'boolean') {
+          return res.status(400).json({
+            success: false,
+            error: 'userId, confirmationId, and confirmed status are required'
+          });
+        }
+
+        // Get the Bizum tool from the registry
+        const bizumTool = this.aiAgent.getAgent().toolRegistry.get('bizum');
+        if (!bizumTool) {
+          return res.status(500).json({
+            success: false,
+            error: 'Bizum tool not available'
+          });
+        }
+
+        // Process the confirmation
+        const result = await bizumTool.confirmTransaction(confirmationId, confirmed, signature);
+
+        // Save the confirmation/cancellation message to conversation history
+        if (result.success) {
+          const agent = this.aiAgent.getAgent();
+          const message = result.cancelled ?
+            'Usuario canceló la transacción Bizum' :
+            `Usuario confirmó la transacción Bizum: ${signature ? 'Firmado digitalmente' : 'Confirmado'}`;
+
+          const responseMessage = result.message + (result.details ? `\n${result.details}` : '');
+
+          // Add both user action and system response to history
+          agent.sessionManager.addMessageToHistory(userId, 'user', message);
+          agent.sessionManager.addMessageToHistory(userId, 'assistant', responseMessage);
+        }
+
+        res.json(result);
+
+      } catch (error) {
+        logger.error('API bizum confirm error', { error: error.message });
+        res.status(500).json({
+          success: false,
+          error: 'Internal server error'
+        });
+      }
+    });
+
     this.app.get('/', (req, res) => {
       res.sendFile(path.join(__dirname, '../public/index.html'));
     });

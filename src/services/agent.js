@@ -74,6 +74,38 @@ class Agent {
           };
 
           const toolResults = await this.executeToolCalls(message.tool_calls, actualUserId);
+
+          // Check if any tool requires confirmation
+          for (const result of toolResults) {
+            const resultContent = JSON.parse(result.content);
+            if (resultContent.requiresConfirmation && resultContent.confirmationType === 'bizum_confirmation') {
+              // Save the confirmation request message to conversation history
+              const confirmationMessage = `${resultContent.message}\n${resultContent.details}`;
+              this.sessionManager.updateConversationHistory(actualUserId, userMessage, confirmationMessage);
+
+              yield {
+                type: 'bizum_confirmation',
+                confirmationId: resultContent.confirmationId,
+                recipient: resultContent.transactionData.recipient,
+                amount: resultContent.transactionData.amount,
+                concept: resultContent.transactionData.concept,
+                userId: actualUserId,
+                isComplete: false
+              };
+
+              // Return early since we're waiting for user confirmation
+              yield {
+                type: 'complete',
+                response: confirmationMessage,
+                userId: actualUserId,
+                iterations: iteration,
+                toolsUsed: [...new Set(toolsUsed)],
+                isComplete: true
+              };
+              return;
+            }
+          }
+
           currentMessages.push(...toolResults);
           continue;
         }
