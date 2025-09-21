@@ -311,6 +311,30 @@
             color: #999;
         }
 
+        .typing-cursor {
+            color: #EC0000;
+            animation: blink 1s infinite;
+            font-weight: 400;
+        }
+
+        @keyframes blink {
+            0%, 50% { opacity: 1; }
+            51%, 100% { opacity: 0; }
+        }
+
+        .message.streaming .message-content {
+            color: #666;
+        }
+
+        .tool-status {
+            padding: 8px 16px;
+            background: #FFF9E6;
+            color: #B8860B;
+            font-size: 12px;
+            border-bottom: 1px solid #F5F5F5;
+            font-style: italic;
+        }
+
         @media (max-width: 768px) {
             .chat-header {
                 padding: 12px 16px;

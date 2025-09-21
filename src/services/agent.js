@@ -20,6 +20,128 @@ class Agent {
     this.toolRegistry.loadToolsFromDirectory(toolsDir);
   }
 
+  async *processMessageStream(userMessage, userId = null, systemPrompt = null) {
+    const { Readable } = require('stream');
+
+    try {
+      const actualUserId = userId || this.sessionManager.generateUserId();
+      const conversationHistory = this.sessionManager.getConversationHistory(actualUserId);
+
+      logger.info('Processing user message with streaming', {
+        userId: actualUserId,
+        messageLength: userMessage.length,
+        historyLength: conversationHistory.length
+      });
+
+      const messages = this.openaiService.formatMessages(
+        userMessage,
+        systemPrompt || this.getDefaultSystemPrompt(),
+        conversationHistory
+      );
+
+      const tools = this.openaiService.formatToolsForOpenAI(
+        this.toolRegistry.getAllSchemas()
+      );
+
+      let iteration = 0;
+      let currentMessages = [...messages];
+      let toolsUsed = [];
+      let fullResponse = '';
+
+      while (iteration < this.maxIterations) {
+        iteration++;
+        logger.debug(`Agent iteration ${iteration} (streaming)`);
+
+        const stream = await this.openaiService.streamChatCompletion(
+          currentMessages,
+          tools.length > 0 ? tools : null
+        );
+
+        let currentMessage = { role: 'assistant', content: '', tool_calls: null };
+        let isToolCall = false;
+
+        for await (const chunk of stream) {
+          const parsedChunks = this.openaiService.parseStreamChunk(chunk);
+
+          for (const parsedChunk of parsedChunks) {
+            if (parsedChunk.type === 'content' && parsedChunk.content) {
+              currentMessage.content += parsedChunk.content;
+              fullResponse += parsedChunk.content;
+
+              yield {
+                type: 'content',
+                content: parsedChunk.content,
+                userId: actualUserId,
+                iteration,
+                isComplete: false
+              };
+            }
+
+            if (parsedChunk.type === 'tool_calls') {
+              isToolCall = true;
+              if (!currentMessage.tool_calls) {
+                currentMessage.tool_calls = [];
+              }
+              // Manejar tool calls en streaming es más complejo
+              // Por simplicidad, esperamos el chunk completo
+            }
+
+            if (parsedChunk.type === 'done' || parsedChunk.finish_reason) {
+              if (isToolCall && currentMessage.tool_calls) {
+                const toolCallNames = currentMessage.tool_calls.map(call => call.function.name);
+                toolsUsed.push(...toolCallNames);
+
+                yield {
+                  type: 'tool_execution',
+                  tools: toolCallNames,
+                  userId: actualUserId,
+                  iteration,
+                  isComplete: false
+                };
+
+                const toolResults = await this.executeToolCalls(currentMessage.tool_calls, actualUserId);
+                currentMessages.push(currentMessage, ...toolResults);
+                break;
+              } else {
+                // Respuesta completa
+                this.sessionManager.updateConversationHistory(actualUserId, userMessage, currentMessage.content);
+
+                yield {
+                  type: 'complete',
+                  response: fullResponse,
+                  userId: actualUserId,
+                  iterations: iteration,
+                  toolsUsed: [...new Set(toolsUsed)],
+                  isComplete: true
+                };
+                return;
+              }
+            }
+          }
+        }
+      }
+
+      yield {
+        type: 'error',
+        error: 'Maximum iterations reached',
+        iterations: iteration,
+        toolsUsed: [...new Set(toolsUsed)],
+        userId: actualUserId,
+        isComplete: true
+      };
+
+    } catch (error) {
+      logger.error('Error processing message with streaming', { error: error.message, userId });
+      yield {
+        type: 'error',
+        error: error.message,
+        toolsUsed: [],
+        userId: actualUserId || userId,
+        isComplete: true
+      };
+    }
+  }
+
   async processMessage(userMessage, userId = null, systemPrompt = null) {
     try {
       // Generar o usar userId existente

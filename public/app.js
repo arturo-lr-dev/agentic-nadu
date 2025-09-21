@@ -119,8 +119,11 @@ class ChatApp {
         this.autoResizeTextarea();
         this.setLoading(true);
 
+        // Crear contenedor para la respuesta en streaming
+        const responseDiv = this.createStreamingMessage();
+
         try {
-            const response = await fetch(`${this.baseURL}/chat`, {
+            const response = await fetch(`${this.baseURL}/chat/stream`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -131,30 +134,158 @@ class ChatApp {
                 }),
             });
 
-            const data = await response.json();
-
-            if (data.success) {
-                // Actualizar userId si es nuevo
-                if (data.userId && !this.userId) {
-                    this.userId = data.userId;
-                    this.saveUserSession();
-                    this.updateHeaderTitle();
-                }
-
-                this.addMessage(data.response, 'assistant', {
-                    iterations: data.iterations,
-                    toolsUsed: data.toolsUsed,
-                    usage: data.usage
-                });
-            } else {
-                this.showError(data.error || 'Error desconocido');
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
             }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let fullResponse = '';
+            let metadata = {};
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                const chunk = decoder.decode(value);
+                const lines = chunk.split('\n');
+
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        const data = line.slice(6).trim();
+
+                        if (data === '[DONE]') break;
+                        if (data === '{"type":"connected"}') continue;
+
+                        try {
+                            const parsed = JSON.parse(data);
+
+                            if (parsed.type === 'content') {
+                                fullResponse += parsed.content;
+                                this.updateStreamingMessage(responseDiv, fullResponse);
+
+                                // Actualizar userId si es nuevo
+                                if (parsed.userId && !this.userId) {
+                                    this.userId = parsed.userId;
+                                    this.saveUserSession();
+                                    this.updateHeaderTitle();
+                                }
+                            } else if (parsed.type === 'tool_execution') {
+                                this.showToolExecution(parsed.tools);
+                            } else if (parsed.type === 'complete') {
+                                metadata = {
+                                    iterations: parsed.iterations,
+                                    toolsUsed: parsed.toolsUsed
+                                };
+                            } else if (parsed.type === 'error') {
+                                this.showError(parsed.error);
+                                return;
+                            }
+                        } catch (parseError) {
+                            console.error('Error parsing stream data:', parseError);
+                        }
+                    }
+                }
+            }
+
+            // Finalizar mensaje con metadata
+            this.finalizeStreamingMessage(responseDiv, fullResponse, metadata);
+
         } catch (error) {
             console.error('Error sending message:', error);
+            this.removeStreamingMessage(responseDiv);
             this.showError('Error de conexión. Por favor, intenta de nuevo.');
         } finally {
             this.setLoading(false);
         }
+    }
+
+    createStreamingMessage() {
+        const messageDiv = document.createElement('div');
+        messageDiv.className = 'message assistant streaming';
+
+        const avatar = document.createElement('div');
+        avatar.className = 'message-avatar';
+
+        const messageContent = document.createElement('div');
+        messageContent.className = 'message-content';
+        messageContent.textContent = '';
+
+        // Agregar cursor de escritura
+        const cursor = document.createElement('span');
+        cursor.className = 'typing-cursor';
+        cursor.textContent = '▋';
+        messageContent.appendChild(cursor);
+
+        messageDiv.appendChild(avatar);
+        messageDiv.appendChild(messageContent);
+
+        this.chatMessages.appendChild(messageDiv);
+        this.scrollToBottom();
+
+        return messageDiv;
+    }
+
+    updateStreamingMessage(messageDiv, content) {
+        const messageContent = messageDiv.querySelector('.message-content');
+        const cursor = messageContent.querySelector('.typing-cursor');
+
+        messageContent.textContent = content;
+        messageContent.appendChild(cursor);
+
+        this.scrollToBottom();
+    }
+
+    finalizeStreamingMessage(messageDiv, content, metadata = {}) {
+        const messageContent = messageDiv.querySelector('.message-content');
+        const cursor = messageContent.querySelector('.typing-cursor');
+
+        // Remover cursor
+        if (cursor) cursor.remove();
+
+        // Remover clase streaming
+        messageDiv.classList.remove('streaming');
+
+        // Agregar metadata si existe
+        if (metadata && Object.keys(metadata).length > 0) {
+            const infoDiv = document.createElement('div');
+            infoDiv.className = 'message-info';
+
+            const infoParts = [];
+            if (metadata.iterations) infoParts.push(`Iteraciones: ${metadata.iterations}`);
+            if (metadata.toolsUsed && metadata.toolsUsed.length > 0) {
+                infoParts.push(`Herramientas: ${metadata.toolsUsed.join(', ')}`);
+            }
+
+            if (infoParts.length > 0) {
+                infoDiv.textContent = infoParts.join(' • ');
+                messageContent.appendChild(infoDiv);
+            }
+        }
+
+        this.scrollToBottom();
+    }
+
+    removeStreamingMessage(messageDiv) {
+        if (messageDiv && messageDiv.parentNode) {
+            messageDiv.remove();
+        }
+    }
+
+    showToolExecution(tools) {
+        const statusDiv = document.createElement('div');
+        statusDiv.className = 'tool-status';
+        statusDiv.textContent = `Ejecutando: ${tools.join(', ')}`;
+
+        this.chatMessages.appendChild(statusDiv);
+        this.scrollToBottom();
+
+        // Remover después de 3 segundos
+        setTimeout(() => {
+            if (statusDiv.parentNode) {
+                statusDiv.remove();
+            }
+        }, 3000);
     }
 
     addMessage(content, sender, metadata = null) {

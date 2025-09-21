@@ -92,6 +92,51 @@ class OpenAIService {
     }
   }
 
+  parseStreamChunk(chunk) {
+    const lines = chunk.toString().split('\n');
+    const results = [];
+
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        const data = line.slice(6).trim();
+
+        if (data === '[DONE]') {
+          results.push({ type: 'done' });
+          continue;
+        }
+
+        try {
+          const parsed = JSON.parse(data);
+          const choice = parsed.choices?.[0];
+
+          if (choice) {
+            const delta = choice.delta;
+
+            if (delta.content) {
+              results.push({
+                type: 'content',
+                content: delta.content,
+                finish_reason: choice.finish_reason
+              });
+            }
+
+            if (delta.tool_calls) {
+              results.push({
+                type: 'tool_calls',
+                tool_calls: delta.tool_calls,
+                finish_reason: choice.finish_reason
+              });
+            }
+          }
+        } catch (parseError) {
+          // Ignorar chunks mal formateados
+        }
+      }
+    }
+
+    return results;
+  }
+
   formatMessages(userMessage, systemPrompt = null, conversationHistory = []) {
     const messages = [];
 

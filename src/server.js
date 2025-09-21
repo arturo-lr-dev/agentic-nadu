@@ -71,6 +71,64 @@ class APIServer {
       }
     });
 
+    this.app.post('/api/chat/stream', async (req, res) => {
+      try {
+        const { message, userId, systemPrompt } = req.body;
+
+        if (!message || typeof message !== 'string') {
+          return res.status(400).json({
+            success: false,
+            error: 'Message is required and must be a string'
+          });
+        }
+
+        if (!this.aiAgent) {
+          return res.status(503).json({
+            success: false,
+            error: 'AI Agent is not initialized'
+          });
+        }
+
+        // Configurar Server-Sent Events
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Headers', 'Cache-Control');
+
+        // Enviar conexión inicial
+        res.write('data: {"type":"connected"}\n\n');
+
+        try {
+          // Usar el método de streaming del agente
+          for await (const chunk of this.aiAgent.getAgent().processMessageStream(message.trim(), userId, systemPrompt)) {
+            res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+
+            if (chunk.isComplete) {
+              break;
+            }
+          }
+        } catch (streamError) {
+          logger.error('Stream processing error', { error: streamError.message });
+          res.write(`data: ${JSON.stringify({
+            type: 'error',
+            error: streamError.message,
+            isComplete: true
+          })}\n\n`);
+        }
+
+        res.write('data: [DONE]\n\n');
+        res.end();
+
+      } catch (error) {
+        logger.error('API chat stream error', { error: error.message });
+        res.status(500).json({
+          success: false,
+          error: 'Internal server error'
+        });
+      }
+    });
+
     this.app.get('/api/tools', (req, res) => {
       try {
         if (!this.aiAgent) {
