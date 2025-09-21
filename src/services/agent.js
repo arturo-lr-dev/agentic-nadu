@@ -21,8 +21,6 @@ class Agent {
   }
 
   async *processMessageStream(userMessage, userId = null, systemPrompt = null) {
-    const { Readable } = require('stream');
-
     try {
       const actualUserId = userId || this.sessionManager.generateUserId();
       const conversationHistory = this.sessionManager.getConversationHistory(actualUserId);
@@ -46,89 +44,97 @@ class Agent {
       let iteration = 0;
       let currentMessages = [...messages];
       let toolsUsed = [];
-      let fullResponse = '';
 
+      // Fase 1: Ejecutar todas las herramientas sin streaming
       while (iteration < this.maxIterations) {
         iteration++;
-        logger.debug(`Agent iteration ${iteration} (streaming)`);
+        logger.debug(`Agent iteration ${iteration} (tool execution phase)`);
 
-        const stream = await this.openaiService.streamChatCompletion(
+        // Usar método normal para herramientas
+        const response = await this.openaiService.createChatCompletion(
           currentMessages,
           tools.length > 0 ? tools : null
         );
 
-        let currentMessage = { role: 'assistant', content: '', tool_calls: null };
-        let isToolCall = false;
+        const choice = response.choices[0];
+        const message = choice.message;
 
-        for await (const chunk of stream) {
-          const parsedChunks = this.openaiService.parseStreamChunk(chunk);
+        currentMessages.push(message);
 
-          for (const parsedChunk of parsedChunks) {
-            if (parsedChunk.type === 'content' && parsedChunk.content) {
-              currentMessage.content += parsedChunk.content;
-              fullResponse += parsedChunk.content;
+        if (choice.finish_reason === 'tool_calls' && message.tool_calls) {
+          const toolCallNames = message.tool_calls.map(call => call.function.name);
+          toolsUsed.push(...toolCallNames);
 
-              yield {
-                type: 'content',
-                content: parsedChunk.content,
-                userId: actualUserId,
-                iteration,
-                isComplete: false
-              };
-            }
+          yield {
+            type: 'tool_execution',
+            tools: toolCallNames,
+            userId: actualUserId,
+            iteration,
+            isComplete: false
+          };
 
-            if (parsedChunk.type === 'tool_calls') {
-              isToolCall = true;
-              if (!currentMessage.tool_calls) {
-                currentMessage.tool_calls = [];
-              }
-              // Manejar tool calls en streaming es más complejo
-              // Por simplicidad, esperamos el chunk completo
-            }
+          const toolResults = await this.executeToolCalls(message.tool_calls, actualUserId);
+          currentMessages.push(...toolResults);
+          continue;
+        }
 
-            if (parsedChunk.type === 'done' || parsedChunk.finish_reason) {
-              if (isToolCall && currentMessage.tool_calls) {
-                const toolCallNames = currentMessage.tool_calls.map(call => call.function.name);
-                toolsUsed.push(...toolCallNames);
+        // Si llegamos aquí, no hay más herramientas por ejecutar
+        break;
+      }
 
-                yield {
-                  type: 'tool_execution',
-                  tools: toolCallNames,
-                  userId: actualUserId,
-                  iteration,
-                  isComplete: false
-                };
+      // Fase 2: Generar respuesta final con streaming
+      logger.debug('Starting final response streaming phase');
 
-                const toolResults = await this.executeToolCalls(currentMessage.tool_calls, actualUserId);
-                currentMessages.push(currentMessage, ...toolResults);
-                break;
-              } else {
-                // Respuesta completa
-                this.sessionManager.updateConversationHistory(actualUserId, userMessage, currentMessage.content);
+      yield {
+        type: 'response_start',
+        userId: actualUserId,
+        isComplete: false
+      };
 
-                yield {
-                  type: 'complete',
-                  response: fullResponse,
-                  userId: actualUserId,
-                  iterations: iteration,
-                  toolsUsed: [...new Set(toolsUsed)],
-                  isComplete: true
-                };
-                return;
-              }
-            }
+      const stream = await this.openaiService.streamChatCompletion(
+        currentMessages,
+        null // Sin herramientas en la respuesta final
+      );
+
+      let finalMessage = { role: 'assistant', content: '' };
+      let fullResponse = '';
+
+      for await (const chunk of stream) {
+        const parsedChunks = this.openaiService.parseStreamChunk(chunk);
+
+        for (const parsedChunk of parsedChunks) {
+          if (parsedChunk.type === 'content' && parsedChunk.content) {
+            finalMessage.content += parsedChunk.content;
+            fullResponse += parsedChunk.content;
+
+            yield {
+              type: 'content',
+              content: parsedChunk.content,
+              userId: actualUserId,
+              iteration,
+              isComplete: false
+            };
+          }
+
+          if (parsedChunk.type === 'done' || parsedChunk.finish_reason) {
+            // Actualizar historial con la respuesta completa
+            this.sessionManager.updateConversationHistory(actualUserId, userMessage, finalMessage.content);
+
+            yield {
+              type: 'complete',
+              response: fullResponse,
+              userId: actualUserId,
+              iterations: iteration,
+              toolsUsed: [...new Set(toolsUsed)],
+              isComplete: true
+            };
+            return;
           }
         }
       }
 
-      yield {
-        type: 'error',
-        error: 'Maximum iterations reached',
-        iterations: iteration,
-        toolsUsed: [...new Set(toolsUsed)],
-        userId: actualUserId,
-        isComplete: true
-      };
+      // Si llegamos aquí sin completar, es un error
+      throw new Error('Stream ended unexpectedly');
 
     } catch (error) {
       logger.error('Error processing message with streaming', { error: error.message, userId });
@@ -136,7 +142,7 @@ class Agent {
         type: 'error',
         error: error.message,
         toolsUsed: [],
-        userId: actualUserId || userId,
+        userId: userId,
         isComplete: true
       };
     }

@@ -172,6 +172,9 @@ class ChatApp {
                                 }
                             } else if (parsed.type === 'tool_execution') {
                                 this.showToolExecution(parsed.tools);
+                            } else if (parsed.type === 'response_start') {
+                                // Las herramientas terminaron, comienza la respuesta
+                                console.log('Starting response streaming...');
                             } else if (parsed.type === 'complete') {
                                 metadata = {
                                     iterations: parsed.iterations,
@@ -236,7 +239,7 @@ class ChatApp {
         this.scrollToBottom();
     }
 
-    finalizeStreamingMessage(messageDiv, content, metadata = {}) {
+    finalizeStreamingMessage(messageDiv, fullContent, metadata = {}) {
         const messageContent = messageDiv.querySelector('.message-content');
         const cursor = messageContent.querySelector('.typing-cursor');
 
@@ -245,6 +248,9 @@ class ChatApp {
 
         // Remover clase streaming
         messageDiv.classList.remove('streaming');
+
+        // Asegurar que el contenido final esté correcto
+        messageContent.textContent = fullContent;
 
         // Agregar metadata si existe
         if (metadata && Object.keys(metadata).length > 0) {
