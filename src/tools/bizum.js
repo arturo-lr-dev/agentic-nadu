@@ -164,104 +164,35 @@ class BizumTool extends BaseTool {
   }
 
   async resolveRecipient(userId, recipient) {
-    // Si parece un número de teléfono, devolverlo directamente
+    // Si parece un número de teléfono español válido, devolverlo directamente
     const phoneRegex = /^(\+34|0034|34)?[6789]\d{8}$/;
-    if (phoneRegex.test(recipient.replace(/\s/g, ''))) {
+    const cleanRecipient = recipient.replace(/\s/g, '');
+
+    if (phoneRegex.test(cleanRecipient)) {
+      // Normalizar el número al formato +34XXXXXXXXX
+      let normalizedPhone = cleanRecipient;
+      if (normalizedPhone.startsWith('0034')) {
+        normalizedPhone = '+34' + normalizedPhone.slice(4);
+      } else if (normalizedPhone.startsWith('34')) {
+        normalizedPhone = '+34' + normalizedPhone.slice(2);
+      } else if (!normalizedPhone.startsWith('+34')) {
+        normalizedPhone = '+34' + normalizedPhone;
+      }
+
       return {
-        value: recipient,
-        displayName: recipient,
-        phone: recipient,
+        value: normalizedPhone,
+        displayName: normalizedPhone,
+        phone: normalizedPhone,
         fromContact: false
       };
     }
 
-    // Si es un ID de contacto específico
-    if (recipient.startsWith('contact_')) {
-      try {
-        const ContactsTool = require('./contacts');
-        const contactsTool = new ContactsTool();
-        const contact = contactsTool.findContactById(userId, recipient);
-
-        if (contact) {
-          return {
-            value: contact.phone,
-            displayName: contact.name,
-            phone: contact.phone,
-            fromContact: true,
-            alias: contact.alias
-          };
-        }
-      } catch (error) {
-        // Continuar con búsqueda normal si hay error
-      }
-    }
-
-    // Si parece un email, buscar por email
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (emailRegex.test(recipient)) {
-      try {
-        const ContactsTool = require('./contacts');
-        const contactsTool = new ContactsTool();
-        const contacts = contactsTool.getAllContacts(userId);
-        const contact = contacts.find(c => c.email.toLowerCase() === recipient.toLowerCase());
-
-        if (contact) {
-          return {
-            value: contact.phone,
-            displayName: contact.name,
-            phone: contact.phone,
-            fromContact: true,
-            alias: contact.alias
-          };
-        }
-      } catch (error) {
-        // Continuar con búsqueda normal si hay error
-      }
-    }
-
-    // Buscar en contactos por nombre/alias
-    try {
-      const ContactsTool = require('./contacts');
-      const contactsTool = new ContactsTool();
-      const contactResult = contactsTool.findContactByName(userId, recipient);
-
-      if (!contactResult) {
-        // No se encontró contacto - rechazar la transacción
-        return {
-          invalidRecipient: true,
-          searchTerm: recipient,
-          error: `No se encontró ningún contacto con el nombre "${recipient}". Para enviar dinero debes:\n\n1. Usar un número de teléfono: "+34XXXXXXXXX"\n2. Agregar el contacto primero: "Agrega a ${recipient} con teléfono +34XXXXXXXXX"\n3. Buscar en tus contactos: "Muestra mis contactos"`
-        };
-      }
-
-      if (contactResult.isMultiple) {
-        // Múltiples contactos encontrados - necesita desambiguación
-        return {
-          needsDisambiguation: true,
-          searchTerm: recipient,
-          matches: contactResult.matches,
-          error: `Se encontraron ${contactResult.matches.length} contactos con el nombre "${recipient}". Especifica cuál quieres usar:`
-        };
-      }
-
-      // Un solo contacto encontrado
-      return {
-        value: contactResult.phone,
-        displayName: contactResult.name,
-        phone: contactResult.phone,
-        fromContact: true,
-        alias: contactResult.alias
-      };
-
-    } catch (error) {
-      // Si hay error accediendo a contactos, usar valor original
-      return {
-        value: recipient,
-        displayName: recipient,
-        phone: null,
-        fromContact: false
-      };
-    }
+    // Si no es un número de teléfono válido, sugerir usar contactos o número completo
+    return {
+      invalidRecipient: true,
+      searchTerm: recipient,
+      error: `"${recipient}" no es un número de teléfono válido. Para enviar un Bizum:\n\n1. Usa un número de teléfono español: "+34XXXXXXXXX" o "6XXXXXXXX"\n2. O primero busca el contacto: "Busca el contacto de ${recipient}"\n3. O ve tus contactos: "Muestra mis contactos"`
+    };
   }
 
   validateTransaction(amount, recipient) {
