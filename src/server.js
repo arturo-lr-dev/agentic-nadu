@@ -90,21 +90,42 @@ class APIServer {
         }
 
         // Configurar Server-Sent Events
-        res.setHeader('Content-Type', 'text/event-stream');
-        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-cache, no-transform');
         res.setHeader('Connection', 'keep-alive');
         res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Access-Control-Allow-Headers', 'Cache-Control');
+        res.setHeader('Access-Control-Allow-Headers', 'Cache-Control, Content-Type');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+        res.setHeader('X-Accel-Buffering', 'no'); // Para nginx
+
+        // Flush headers inmediatamente
+        res.flushHeaders();
 
         // Enviar conexión inicial
         res.write('data: {"type":"connected"}\n\n');
+        if (res.flush) res.flush();
 
         try {
+          logger.info('Starting streaming for message', { messagePreview: message.substring(0, 50) });
+
           // Usar el método de streaming del agente
           for await (const chunk of this.aiAgent.getAgent().processMessageStream(message.trim(), userId, systemPrompt)) {
-            res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+            logger.debug('Sending stream chunk', {
+              type: chunk.type,
+              contentLength: chunk.content?.length || 0,
+              isComplete: chunk.isComplete
+            });
+
+            const chunkData = JSON.stringify(chunk);
+            res.write(`data: ${chunkData}\n\n`);
+
+            // Forzar el envío inmediato
+            if (res.flush) res.flush();
+
+            logger.debug('Chunk sent and flushed', { chunkSize: chunkData.length });
 
             if (chunk.isComplete) {
+              logger.info('Stream completed');
               break;
             }
           }
@@ -115,9 +136,11 @@ class APIServer {
             error: streamError.message,
             isComplete: true
           })}\n\n`);
+          if (res.flush) res.flush();
         }
 
         res.write('data: [DONE]\n\n');
+        if (res.flush) res.flush();
         res.end();
 
       } catch (error) {

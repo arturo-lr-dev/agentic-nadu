@@ -143,24 +143,41 @@ class ChatApp {
             let fullResponse = '';
             let metadata = {};
 
+            console.log('🔄 Stream reader initialized');
+
             while (true) {
                 const { done, value } = await reader.read();
-                if (done) break;
+                if (done) {
+                    console.log('✅ Stream reading completed');
+                    break;
+                }
 
                 const chunk = decoder.decode(value);
+                console.log('📦 Received chunk:', chunk.length, 'chars');
+                console.log('📦 Chunk content:', chunk);
+
                 const lines = chunk.split('\n');
 
                 for (const line of lines) {
                     if (line.startsWith('data: ')) {
                         const data = line.slice(6).trim();
+                        console.log('📨 Processing line:', data);
 
-                        if (data === '[DONE]') break;
-                        if (data === '{"type":"connected"}') continue;
+                        if (data === '[DONE]') {
+                            console.log('🏁 Received DONE signal');
+                            break;
+                        }
+                        if (data === '{"type":"connected"}') {
+                            console.log('🔌 Connection confirmed');
+                            continue;
+                        }
 
                         try {
                             const parsed = JSON.parse(data);
+                            console.log('✅ Parsed chunk:', parsed.type, parsed);
 
                             if (parsed.type === 'content') {
+                                console.log('📝 Content chunk:', parsed.content);
                                 fullResponse += parsed.content;
                                 this.updateStreamingMessage(responseDiv, fullResponse);
 
@@ -171,21 +188,23 @@ class ChatApp {
                                     this.updateHeaderTitle();
                                 }
                             } else if (parsed.type === 'tool_execution') {
+                                console.log('🔧 Tool execution:', parsed.tools);
                                 this.showToolExecution(parsed.tools);
                             } else if (parsed.type === 'response_start') {
-                                // Las herramientas terminaron, comienza la respuesta
-                                console.log('Starting response streaming...');
+                                console.log('🚀 Starting response streaming...');
                             } else if (parsed.type === 'complete') {
+                                console.log('✅ Stream complete:', parsed);
                                 metadata = {
                                     iterations: parsed.iterations,
                                     toolsUsed: parsed.toolsUsed
                                 };
                             } else if (parsed.type === 'error') {
+                                console.error('❌ Stream error:', parsed.error);
                                 this.showError(parsed.error);
                                 return;
                             }
                         } catch (parseError) {
-                            console.error('Error parsing stream data:', parseError);
+                            console.error('❌ Error parsing stream data:', parseError, 'Data:', data);
                         }
                     }
                 }
