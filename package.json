@@ -15,6 +15,7 @@
     "test:multiuser": "node examples/test-multiuser-agent.js",
     "test:contacts": "node examples/test-contacts-integration.js",
     "test:duplicates": "node examples/test-duplicate-contacts.js",
+    "test:strict": "node examples/test-strict-validation.js",
     "example:basic": "node examples/basic-usage.js",
     "example:custom": "node examples/custom-tool.js",
     "lint": "eslint src/",

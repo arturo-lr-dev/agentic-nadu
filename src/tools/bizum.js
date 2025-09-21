@@ -77,6 +77,20 @@ class BizumTool extends BaseTool {
       // Buscar en contactos si el recipient es un nombre
       const resolvedRecipient = await this.resolveRecipient(actualUserId, recipient);
 
+      // Verificar si el destinatario es inválido (no es contacto ni número)
+      if (resolvedRecipient.invalidRecipient) {
+        return {
+          success: false,
+          invalidRecipient: true,
+          error: resolvedRecipient.error,
+          suggestions: [
+            `Usar número directo: "Envía ${amount}€ a +34XXXXXXXXX"`,
+            `Agregar contacto: "Agrega a ${resolvedRecipient.searchTerm} con teléfono +34XXXXXXXXX"`,
+            `Ver contactos: "Muestra mis contactos"`
+          ]
+        };
+      }
+
       // Verificar si necesita desambiguación
       if (resolvedRecipient.needsDisambiguation) {
         const contactsList = resolvedRecipient.matches.map((contact, index) =>
@@ -214,12 +228,11 @@ class BizumTool extends BaseTool {
       const contactResult = contactsTool.findContactByName(userId, recipient);
 
       if (!contactResult) {
-        // No se encontró contacto, usar valor original
+        // No se encontró contacto - rechazar la transacción
         return {
-          value: recipient,
-          displayName: recipient,
-          phone: null,
-          fromContact: false
+          invalidRecipient: true,
+          searchTerm: recipient,
+          error: `No se encontró ningún contacto con el nombre "${recipient}". Para enviar dinero debes:\n\n1. Usar un número de teléfono: "+34XXXXXXXXX"\n2. Agregar el contacto primero: "Agrega a ${recipient} con teléfono +34XXXXXXXXX"\n3. Buscar en tus contactos: "Muestra mis contactos"`
         };
       }
 
