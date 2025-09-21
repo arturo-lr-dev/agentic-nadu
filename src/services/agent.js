@@ -78,7 +78,44 @@ class Agent {
           continue;
         }
 
-        // Si llegamos aquí, no hay más herramientas por ejecutar
+        // Si hay contenido en la respuesta, usar streaming para mostrarlo
+        if (message.content && message.content.trim()) {
+          logger.debug('Found content in phase 1, streaming it:', message.content);
+
+          // Simular streaming del contenido ya generado
+          const content = message.content;
+          const words = content.split(' ');
+
+          for (let i = 0; i < words.length; i++) {
+            const chunk = i === 0 ? words[i] : ' ' + words[i];
+
+            yield {
+              type: 'content',
+              content: chunk,
+              userId: actualUserId,
+              iteration,
+              isComplete: false
+            };
+
+            // Pequeña pausa para simular streaming
+            await new Promise(resolve => setTimeout(resolve, 50));
+          }
+
+          // Actualizar historial
+          this.sessionManager.updateConversationHistory(actualUserId, userMessage, content);
+
+          yield {
+            type: 'complete',
+            response: content,
+            userId: actualUserId,
+            iterations: iteration,
+            toolsUsed: [...new Set(toolsUsed)],
+            isComplete: true
+          };
+          return;
+        }
+
+        // Si llegamos aquí, no hay más herramientas por ejecutar ni contenido
         break;
       }
 
