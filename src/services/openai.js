@@ -93,26 +93,48 @@ class OpenAIService {
   }
 
   parseStreamChunk(chunk) {
-    const lines = chunk.toString().split('\n');
+    const { logger } = require('../utils/logger');
+
+    const chunkStr = chunk.toString();
+    logger.debug('Raw chunk received:', {
+      length: chunkStr.length,
+      content: chunkStr
+    });
+
+    const lines = chunkStr.split('\n');
     const results = [];
+
+    logger.debug(`Processing ${lines.length} lines from chunk`);
 
     for (const line of lines) {
       if (line.startsWith('data: ')) {
         const data = line.slice(6).trim();
+        logger.debug('Processing data line:', data);
 
         if (data === '[DONE]') {
+          logger.debug('Found DONE signal');
           results.push({ type: 'done' });
+          continue;
+        }
+
+        if (data === '') {
+          logger.debug('Empty data line, skipping');
           continue;
         }
 
         try {
           const parsed = JSON.parse(data);
+          logger.debug('Parsed JSON:', parsed);
+
           const choice = parsed.choices?.[0];
+          logger.debug('Choice object:', choice);
 
           if (choice) {
             const delta = choice.delta;
+            logger.debug('Delta object:', delta);
 
             if (delta.content) {
+              logger.debug('Found content in delta:', delta.content);
               results.push({
                 type: 'content',
                 content: delta.content,
@@ -121,19 +143,32 @@ class OpenAIService {
             }
 
             if (delta.tool_calls) {
+              logger.debug('Found tool_calls in delta:', delta.tool_calls);
               results.push({
                 type: 'tool_calls',
                 tool_calls: delta.tool_calls,
                 finish_reason: choice.finish_reason
               });
             }
+
+            if (choice.finish_reason && !delta.content && !delta.tool_calls) {
+              logger.debug('Found finish_reason without content:', choice.finish_reason);
+              results.push({
+                type: 'done',
+                finish_reason: choice.finish_reason
+              });
+            }
           }
         } catch (parseError) {
-          // Ignorar chunks mal formateados
+          logger.warn('Error parsing JSON data:', {
+            error: parseError.message,
+            data: data
+          });
         }
       }
     }
 
+    logger.debug(`Returning ${results.length} parsed results:`, results);
     return results;
   }
 

@@ -91,6 +91,11 @@ class Agent {
         isComplete: false
       };
 
+      logger.debug('Current messages for streaming:', {
+        messageCount: currentMessages.length,
+        lastMessage: currentMessages[currentMessages.length - 1]
+      });
+
       const stream = await this.openaiService.streamChatCompletion(
         currentMessages,
         null // Sin herramientas en la respuesta final
@@ -98,12 +103,25 @@ class Agent {
 
       let finalMessage = { role: 'assistant', content: '' };
       let fullResponse = '';
+      let chunkCount = 0;
+
+      logger.debug('Stream created, starting to read chunks...');
 
       for await (const chunk of stream) {
+        chunkCount++;
+        logger.debug(`Processing chunk ${chunkCount}:`, {
+          chunkSize: chunk?.length || 0,
+          chunkPreview: chunk?.toString().substring(0, 100)
+        });
+
         const parsedChunks = this.openaiService.parseStreamChunk(chunk);
+        logger.debug(`Parsed ${parsedChunks.length} chunks from raw chunk`);
 
         for (const parsedChunk of parsedChunks) {
+          logger.debug('Processing parsed chunk:', parsedChunk);
+
           if (parsedChunk.type === 'content' && parsedChunk.content) {
+            logger.debug('Found content chunk:', parsedChunk.content);
             finalMessage.content += parsedChunk.content;
             fullResponse += parsedChunk.content;
 
@@ -117,6 +135,11 @@ class Agent {
           }
 
           if (parsedChunk.type === 'done' || parsedChunk.finish_reason) {
+            logger.debug('Stream finished:', {
+              finishReason: parsedChunk.finish_reason,
+              finalResponseLength: fullResponse.length
+            });
+
             // Actualizar historial con la respuesta completa
             this.sessionManager.updateConversationHistory(actualUserId, userMessage, finalMessage.content);
 
@@ -132,6 +155,11 @@ class Agent {
           }
         }
       }
+
+      logger.warn('Stream ended without completion signal', {
+        chunkCount,
+        finalResponseLength: fullResponse.length
+      });
 
       // Si llegamos aquí sin completar, es un error
       throw new Error('Stream ended unexpectedly');
