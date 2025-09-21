@@ -18,7 +18,7 @@ class BizumTool extends BaseTool {
           },
           recipient: {
             type: 'string',
-            description: 'Nombre del destinatario o número de teléfono'
+            description: 'Nombre del destinatario, número de teléfono, email, o ID de contacto específico (contact_xxx)'
           },
           concept: {
             type: 'string',
@@ -74,8 +74,25 @@ class BizumTool extends BaseTool {
         return this.getTransactionHistory(actualUserId);
       }
 
+      // Buscar en contactos si el recipient es un nombre
+      const resolvedRecipient = await this.resolveRecipient(actualUserId, recipient);
+
+      // Verificar si necesita desambiguación
+      if (resolvedRecipient.needsDisambiguation) {
+        const contactsList = resolvedRecipient.matches.map((contact, index) =>
+          `${index + 1}. ${contact.name} (${contact.phone}) - ${contact.email || 'Sin email'}`
+        ).join('\n');
+
+        return {
+          success: false,
+          needsDisambiguation: true,
+          error: `${resolvedRecipient.error}\n\n${contactsList}\n\nPuedes especificar:\n- El número completo: "Envía ${amount}€ a ${resolvedRecipient.matches[0].phone}"\n- Más detalles del nombre: "Envía ${amount}€ a ${resolvedRecipient.matches[0].name}"\n- O usar el email si lo conoces`,
+          matches: resolvedRecipient.matches
+        };
+      }
+
       // Validaciones
-      const validation = this.validateTransaction(amount, recipient);
+      const validation = this.validateTransaction(amount, resolvedRecipient.value);
       if (!validation.valid) {
         return {
           success: false,
@@ -89,7 +106,9 @@ class BizumTool extends BaseTool {
         userId: actualUserId,
         type: action,
         amount: parseFloat(amount.toFixed(2)),
-        recipient: recipient.trim(),
+        recipient: resolvedRecipient.displayName,
+        recipientPhone: resolvedRecipient.phone || resolvedRecipient.value,
+        fromContact: resolvedRecipient.fromContact,
         concept: concept.trim(),
         timestamp: new Date().toISOString(),
         status: 'completed',
@@ -118,15 +137,118 @@ class BizumTool extends BaseTool {
           timestamp: `${transaction.date} ${transaction.time}`
         },
         message: `✅ Bizum ${actionText} correctamente`,
-        details: `Has ${actionText} ${transaction.amount}€ ${preposition} ${transaction.recipient}`,
+        details: `Has ${actionText} ${transaction.amount}€ ${preposition} ${transaction.recipient}${transaction.fromContact ? ' (desde contactos)' : ''}`,
         reference: `Referencia: ${transaction.id}`,
-        userInfo: `Usuario: ${actualUserId}`
+        userInfo: `Usuario: ${actualUserId}`,
+        contactUsed: transaction.fromContact
       };
 
     } catch (error) {
       return {
         success: false,
         error: `Error en la transacción Bizum: ${error.message}`
+      };
+    }
+  }
+
+  async resolveRecipient(userId, recipient) {
+    // Si parece un número de teléfono, devolverlo directamente
+    const phoneRegex = /^(\+34|0034|34)?[6789]\d{8}$/;
+    if (phoneRegex.test(recipient.replace(/\s/g, ''))) {
+      return {
+        value: recipient,
+        displayName: recipient,
+        phone: recipient,
+        fromContact: false
+      };
+    }
+
+    // Si es un ID de contacto específico
+    if (recipient.startsWith('contact_')) {
+      try {
+        const ContactsTool = require('./contacts');
+        const contactsTool = new ContactsTool();
+        const contact = contactsTool.findContactById(userId, recipient);
+
+        if (contact) {
+          return {
+            value: contact.phone,
+            displayName: contact.name,
+            phone: contact.phone,
+            fromContact: true,
+            alias: contact.alias
+          };
+        }
+      } catch (error) {
+        // Continuar con búsqueda normal si hay error
+      }
+    }
+
+    // Si parece un email, buscar por email
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (emailRegex.test(recipient)) {
+      try {
+        const ContactsTool = require('./contacts');
+        const contactsTool = new ContactsTool();
+        const contacts = contactsTool.getAllContacts(userId);
+        const contact = contacts.find(c => c.email.toLowerCase() === recipient.toLowerCase());
+
+        if (contact) {
+          return {
+            value: contact.phone,
+            displayName: contact.name,
+            phone: contact.phone,
+            fromContact: true,
+            alias: contact.alias
+          };
+        }
+      } catch (error) {
+        // Continuar con búsqueda normal si hay error
+      }
+    }
+
+    // Buscar en contactos por nombre/alias
+    try {
+      const ContactsTool = require('./contacts');
+      const contactsTool = new ContactsTool();
+      const contactResult = contactsTool.findContactByName(userId, recipient);
+
+      if (!contactResult) {
+        // No se encontró contacto, usar valor original
+        return {
+          value: recipient,
+          displayName: recipient,
+          phone: null,
+          fromContact: false
+        };
+      }
+
+      if (contactResult.isMultiple) {
+        // Múltiples contactos encontrados - necesita desambiguación
+        return {
+          needsDisambiguation: true,
+          searchTerm: recipient,
+          matches: contactResult.matches,
+          error: `Se encontraron ${contactResult.matches.length} contactos con el nombre "${recipient}". Especifica cuál quieres usar:`
+        };
+      }
+
+      // Un solo contacto encontrado
+      return {
+        value: contactResult.phone,
+        displayName: contactResult.name,
+        phone: contactResult.phone,
+        fromContact: true,
+        alias: contactResult.alias
+      };
+
+    } catch (error) {
+      // Si hay error accediendo a contactos, usar valor original
+      return {
+        value: recipient,
+        displayName: recipient,
+        phone: null,
+        fromContact: false
       };
     }
   }
@@ -232,6 +354,8 @@ class BizumTool extends BaseTool {
           type: t.type === 'send' ? 'Envío' : 'Solicitud',
           amount: `${t.amount}€`,
           recipient: t.recipient,
+          phone: t.recipientPhone || 'N/A',
+          fromContact: t.fromContact ? '📱' : '',
           concept: t.concept,
           date: t.date,
           time: t.time,

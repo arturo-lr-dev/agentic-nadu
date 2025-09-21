@@ -13,6 +13,8 @@
     "test:auto": "node examples/test-auto-detection.js",
     "test:bizum": "node examples/test-bizum.js",
     "test:multiuser": "node examples/test-multiuser-agent.js",
+    "test:contacts": "node examples/test-contacts-integration.js",
+    "test:duplicates": "node examples/test-duplicate-contacts.js",
     "example:basic": "node examples/basic-usage.js",
     "example:custom": "node examples/custom-tool.js",
     "lint": "eslint src/",
