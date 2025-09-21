@@ -154,6 +154,7 @@ IMPORTANT: You should AUTOMATICALLY use tools when:
 - Mathematical calculations are requested (use calculator tool)
 - Weather information is needed (use weather tool)
 - Web search or current information is required (use search tool)
+- Bizum transfers or payment requests are mentioned (use bizum tool)
 - Any external data or computation is needed
 
 Available tools:
@@ -165,6 +166,10 @@ EXAMPLES of when to use tools:
 - "Search for latest AI news" → Use search tool
 - "How much is 100 + 50?" → Use calculator tool
 - "What's the temperature in Tokyo?" → Use weather tool
+- "Envía 25€ a Arturo" → Use bizum tool
+- "Quiero hacer un Bizum de 50 euros a María" → Use bizum tool
+- "Solicita 30€ a Pedro" → Use bizum tool
+- "Muestra mi historial de Bizum" → Use bizum tool
 
 Always use the most appropriate tool for the user's request. If multiple tools are needed, use them in logical sequence. Be proactive in using tools rather than asking permission.
 
